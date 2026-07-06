@@ -5,9 +5,6 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:api_analytics}
     username: ${POSTGRES_USER:api_analytics}
     password: ${POSTGRES_PASSWORD:change_me_locally}
-  jpa:
-    hibernate:
-      ddl-auto: validate
   data:
     redis:
       host: ${REDIS_HOST:localhost}

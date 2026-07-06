@@ -3,6 +3,13 @@ spring:
     name: gateway-service
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins: "*"
+            allowed-methods: "*"
+            allowed-headers: "*"
+            max-age: 3600
       routes:
         - id: auth
           uri: http://${AUTH_HOST:auth-service}:${PORT_AUTH:8081}
