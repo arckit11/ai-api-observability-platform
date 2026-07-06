@@ -2,19 +2,21 @@
 
 Routers for each module are wired here. Concrete inference and training
 lives in ``app.modules.<name>``; this file is only composition and
-cross-cutting concerns (health, logging, error handlers).
+cross-cutting concerns (health, admin, error handlers).
 """
 from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from app import __version__
+from app.config import settings
 from app.modules.alerts.router import router as alerts_router
 from app.modules.anomaly.router import router as anomaly_router
 from app.modules.failure.router import router as failure_router
 from app.modules.health.router import router as health_router
 from app.modules.traffic.router import router as traffic_router
 from app.schemas import HealthStatus, ModuleName
+from app.training import registry
 
 app = FastAPI(
     title="ML Prediction Service",
@@ -26,6 +28,17 @@ app = FastAPI(
 )
 
 
+@app.on_event("startup")
+async def _preload_models() -> None:
+    """Eagerly load any trained artifacts under ML_MODEL_DIR.
+
+    Missing artifacts are fine — routers fall back to the heuristic
+    baseline. Preloading avoids first-request latency spikes.
+    """
+    for m in ("traffic", "failure", "anomaly", "alerts"):
+        registry.get(m)
+
+
 @app.get("/healthz", response_model=HealthStatus, tags=["health"])
 async def healthz() -> HealthStatus:
     return HealthStatus(status="ok", version=__version__)
@@ -33,13 +46,10 @@ async def healthz() -> HealthStatus:
 
 @app.get("/readyz", response_model=HealthStatus, tags=["health"])
 async def readyz() -> HealthStatus:
-    # Phase 0 stub — real readiness checks (model files present, kafka reachable)
-    # arrive with the module implementations.
-    return HealthStatus(
-        status="ok",
-        version=__version__,
-        models_loaded=[],
-    )
+    loaded = [ModuleName(m["module"]) for m in registry.list_loaded()]
+    # Health-scoring is deterministic — always "ready".
+    loaded.append(ModuleName.HEALTH)
+    return HealthStatus(status="ok", version=__version__, models_loaded=loaded)
 
 
 app.include_router(traffic_router)
@@ -51,15 +61,26 @@ app.include_router(alerts_router)
 
 @app.get("/admin/models", tags=["admin"])
 async def list_models() -> list[dict]:
-    # Placeholder; real listing reads app.state.models registered by loaders.
-    return []
+    # Ensure every learnable module is at least attempted so the listing
+    # reflects on-disk state, not just what's been called.
+    for m in ("traffic", "failure", "anomaly", "alerts"):
+        registry.get(m)
+    return registry.list_loaded()
 
 
 @app.post("/admin/models/{module}/reload", tags=["admin"])
 async def reload_model(module: ModuleName) -> dict:
-    return {
-        "module": module,
-        "version": "0.0.0",
-        "trained_at": datetime.now(UTC).isoformat(),
-        "reloaded": True,
-    }
+    if module == ModuleName.HEALTH:
+        return {
+            "module": module.value,
+            "version": "deterministic",
+            "trained_at": datetime.now(UTC).isoformat(),
+            "reloaded": True,
+        }
+    bundle = registry.reload(module.value)
+    if bundle is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No artifact on disk for module '{module.value}' at {settings.model_dir}",
+        )
+    return {**bundle["meta"], "reloaded": True}

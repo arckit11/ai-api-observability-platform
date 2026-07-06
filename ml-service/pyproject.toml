@@ -24,6 +24,9 @@ dependencies = [
     "python-json-logger>=2.0.7",
     "prometheus-client>=0.20.0",
     "apscheduler>=3.10.0",        # periodic retraining
+    "psycopg[binary]>=3.2.0",     # direct metrics reads (Phase 3)
+    "typer>=0.12.0",              # training CLI
+    "rich>=13.7.0",
 ]
 
 [project.optional-dependencies]

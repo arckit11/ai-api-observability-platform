@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
+from app.kafka import publish_prediction
 from app.schemas import (
     HealthComponents,
     HealthScoreRequest,
@@ -61,7 +62,7 @@ async def score_health(req: HealthScoreRequest) -> HealthScoreResponse:
         )
 
     score = 100.0 * weighted
-    return HealthScoreResponse(
+    resp = HealthScoreResponse(
         service_id=req.service_id,
         score=score,
         status=_status(score),
@@ -73,3 +74,5 @@ async def score_health(req: HealthScoreRequest) -> HealthScoreResponse:
         ),
         generated_at=datetime.now(UTC),
     )
+    publish_prediction("health", req.service_id, resp.model_dump(mode="json"))
+    return resp

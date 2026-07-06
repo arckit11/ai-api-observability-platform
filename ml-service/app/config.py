@@ -33,5 +33,20 @@ class Settings(BaseSettings):
     # Retraining
     training_cron: str = Field("0 3 * * *", alias="ML_TRAINING_SCHEDULE_CRON")
 
+    # Direct-Postgres reads during Phase 3. Analytics HTTP endpoint replaces
+    # these in Phase 4.
+    pg_host: str = Field("localhost", alias="POSTGRES_HOST")
+    pg_port: int = Field(5432, alias="POSTGRES_PORT")
+    pg_db: str = Field("api_analytics", alias="POSTGRES_DB")
+    pg_user: str = Field("api_analytics", alias="POSTGRES_USER")
+    pg_password: str = Field("change_me_locally", alias="POSTGRES_PASSWORD")
+
+    @property
+    def pg_dsn(self) -> str:
+        return (
+            f"host={self.pg_host} port={self.pg_port} "
+            f"dbname={self.pg_db} user={self.pg_user} password={self.pg_password}"
+        )
+
 
 settings = Settings()

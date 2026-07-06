@@ -1,21 +1,66 @@
 # Synthetic Data Generator
 
-Purpose: bootstrap training / evaluation data for the ML modules before
-enough real production traffic accumulates. Detailed in paper §VI-A.
+Standalone tool that produces 30 days of realistic 1-minute API telemetry
+per service, with anomaly + failure injection for evaluation. Written to
+the platform's Postgres `metrics` table (or CSV for offline use).
 
-**Not implemented yet** — placeholder for Phase 2. Planned output:
+Detailed in the accompanying paper §VI-A.
 
-- 30 days of one-minute-interval metric records per registered service
-- Diurnal + weekly seasonality with Gaussian noise on baseline traffic
-- Anomaly injection: response times × factor for fixed-duration windows
-- Failure injection: elevated error rate + P99 latency in 15-min blocks
-- Ground-truth labels for evaluation (RMSE/MAPE, precision/recall)
+## Traffic model
 
-Emits records via one of:
-1. Direct writes to Postgres (`metrics` table)
-2. Kafka producer on `metrics` topic (exercises the full ingestion path)
+For each configured service, one-minute RPM is a superposition of:
 
-CLI target once implemented:
+- Baseline traffic level (per-service constant)
+- Diurnal cycle — cosine over 24h, peaking around 14:00
+- Weekly cycle — Mon-Fri at full traffic, weekends scaled down
+- Gaussian noise on top
+
+Latency and error rate are derived from load: below 50% capacity latency
+is flat; above that, P99 grows super-linearly. Error rate lifts once load
+exceeds 70% capacity.
+
+## Fault injection
+
+- **Anomaly episodes** — response times multiplied by 3-6× for 5-20 min windows,
+  Poisson-sampled at ~0.5 events / service / day
+- **Failure episodes** — error rate forced ≥ 15% and P99 latency ≥ 2.5s for
+  15-min blocks, Poisson-sampled at ~0.1 events / service / day
+
+Ground-truth labels (`is_anomaly`, `is_failure_window`) are written to
+`out/labels.csv` alongside the metrics for evaluation.
+
+## Install
+
+```bash
+cd synthetic-data
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -e .
 ```
-python -m synthetic_data.generate --services 5 --days 30 --emit kafka
+
+## Use
+
+```bash
+# 30 days into the platform Postgres (default)
+synth generate --days 30
+
+# 7 days for a quick smoke test, custom seed
+synth generate --days 7 --seed 1
+
+# CSV output instead of Postgres
+synth generate --days 7 --out csv --path out/metrics.csv
+
+# Clean up synthetic rows before regenerating
+synth clear --since 2026-01-01
 ```
+
+## Default service inventory
+
+Five services are registered on first run (`owner = 'synthetic'`):
+
+| Name | Baseline RPM | Capacity RPM | Baseline P99 |
+|---|---:|---:|---:|
+| payments-api      |   350 |  1800 | 180 ms |
+| inventory-api     |   800 |  3500 | 140 ms |
+| orders-api        |   250 |  1200 | 220 ms |
+| user-api          |   180 |  1500 |  90 ms |
+| notification-api  |   120 |   800 | 310 ms |
