@@ -17,13 +17,18 @@
     <description>JWT filter, RBAC utilities, role definitions.</description>
 
     <dependencies>
+        <!-- Web / security are provided by the consuming service so this
+             module works in both servlet (Tomcat) and reactive (WebFlux)
+             containers. Pulling either transitively would break the other. -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot</artifactId>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

@@ -17,9 +17,12 @@
     <description>Common exception types + RFC 7807 problem-detail responses.</description>
 
     <dependencies>
+        <!-- Consumer picks its own web stack (servlet or reactive). We only
+             need the core web abstractions (ProblemDetail, HttpStatus). -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 </project>
