@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: auth-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:api_analytics}
+    username: ${POSTGRES_USER:api_analytics}
+    password: ${POSTGRES_PASSWORD:change_me_locally}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration,filesystem:../db/migrations
+
+server:
+  port: ${PORT_AUTH:8081}
+
+jwt:
+  secret: ${JWT_SECRET:replace_me}
+  issuer: ${JWT_ISSUER:innovations-api}
+  access-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:900}
+  refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

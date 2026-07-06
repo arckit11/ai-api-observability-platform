@@ -1,0 +1,118 @@
+# Local dev stack for the AI-Powered API Performance Analytics Platform.
+# Application services (gateway, auth, registry, metrics-collector, analytics,
+# dashboard, ml-service) will be added in later phases; Phase 0 only stands up
+# the infrastructure needed for both subsystems.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: iapi-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-api_analytics}
+      POSTGRES_USER: ${POSTGRES_USER:-api_analytics}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_locally}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-api_analytics} -d ${POSTGRES_DB:-api_analytics}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [iapi-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: iapi-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [iapi-net]
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: iapi-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [iapi-net]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: iapi-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      # 9092 = in-network listener for services on the compose network
+      # 29092 = host listener for tools running on your laptop
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [iapi-net]
+
+  kafka-init:
+    # One-shot container that creates the platform's topics with sane defaults.
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: iapi-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      set -eu
+      BS=kafka:9092
+      create() { kafka-topics --bootstrap-server $$BS --create --if-not-exists --topic $$1 --partitions $$2 --replication-factor 1; }
+      create api-logs 6
+      create api-logs-dlq 1
+      create metrics 3
+      create alerts 3
+      create predictions 3
+      create service-health 1
+      kafka-topics --bootstrap-server $$BS --list
+      "
+    networks: [iapi-net]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: iapi-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    networks: [iapi-net]
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  iapi-net:
+    driver: bridge

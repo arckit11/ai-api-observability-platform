@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      routes:
+        - id: auth
+          uri: http://${AUTH_HOST:auth-service}:${PORT_AUTH:8081}
+          predicates:
+            - Path=/auth/**
+        - id: registry
+          uri: http://${REGISTRY_HOST:registry-service}:${PORT_REGISTRY:8082}
+          predicates:
+            - Path=/registry/**
+        - id: analytics
+          uri: http://${ANALYTICS_HOST:analytics-service}:${PORT_ANALYTICS:8084}
+          predicates:
+            - Path=/analytics/**
+        - id: dashboard
+          uri: http://${DASHBOARD_HOST:dashboard-service}:${PORT_DASHBOARD:8085}
+          predicates:
+            - Path=/dashboard/**
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+
+server:
+  port: ${PORT_GATEWAY:8080}
+
+jwt:
+  secret: ${JWT_SECRET:replace_me}
+  issuer: ${JWT_ISSUER:innovations-api}
+
+kafka:
+  topics:
+    api-logs: ${KAFKA_TOPIC_API_LOGS:api-logs}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway

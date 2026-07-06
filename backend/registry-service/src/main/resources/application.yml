@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: registry-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:api_analytics}
+    username: ${POSTGRES_USER:api_analytics}
+    password: ${POSTGRES_PASSWORD:change_me_locally}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+server:
+  port: ${PORT_REGISTRY:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

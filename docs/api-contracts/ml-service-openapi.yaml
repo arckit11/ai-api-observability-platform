@@ -1,0 +1,499 @@
+openapi: 3.0.3
+info:
+  title: ML Prediction Service
+  version: 0.1.0
+  description: |
+    Predictive monitoring endpoints served by the FastAPI ML subsystem.
+    Consumed by the Dashboard Service and (indirectly) by clients via the
+    Spring Cloud Gateway. Trained on features exposed by the Analytics
+    Service's `/analytics/metrics/history` endpoint.
+
+    This spec is the source of truth for the boundary between the Java
+    backend and the Python ML service; both sides generate clients / stubs
+    from it.
+
+servers:
+  - url: http://localhost:8000
+    description: Local dev
+  - url: http://ml-service:8000
+    description: In-cluster (docker compose / k8s)
+
+tags:
+  - name: health
+    description: Service health & readiness
+  - name: traffic
+    description: Module 1 — traffic forecasting
+  - name: failure
+    description: Module 2 — failure prediction
+  - name: anomaly
+    description: Module 3 — anomaly detection
+  - name: score
+    description: Module 4 — composite health scoring
+  - name: alerts
+    description: Module 5 — alert prioritization
+  - name: admin
+    description: Model management
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Readiness probe (models loaded, deps reachable)
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+
+  /predict/traffic:
+    post:
+      tags: [traffic]
+      summary: Forecast RPM at a horizon (Module 1)
+      description: |
+        XGBoost Regressor over lag + rolling + cyclical-time features.
+        Horizons in minutes; typical values 15 / 30 / 60 / 360.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrafficPredictionRequest"
+      responses:
+        "200":
+          description: Forecast produced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrafficPredictionResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { $ref: "#/components/responses/ModelUnavailable" }
+
+  /predict/failure:
+    post:
+      tags: [failure]
+      summary: P(failure in next 30 min) (Module 2)
+      description: |
+        XGBoost Classifier. Failure = P99 latency > 2s OR error rate > 10%
+        sustained for 5+ consecutive one-minute windows. Recall is the
+        primary optimisation target.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FailurePredictionRequest"
+      responses:
+        "200":
+          description: Prediction produced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FailurePredictionResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { $ref: "#/components/responses/ModelUnavailable" }
+
+  /predict/anomaly:
+    post:
+      tags: [anomaly]
+      summary: Anomaly score for a metric snapshot (Module 3)
+      description: |
+        Isolation Forest anomaly detection. Returns a normalised score in
+        [0, 1] where higher = more anomalous, plus a boolean flag applying
+        the tuned threshold.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnomalyRequest"
+      responses:
+        "200":
+          description: Anomaly assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnomalyResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { $ref: "#/components/responses/ModelUnavailable" }
+
+  /score/health:
+    post:
+      tags: [score]
+      summary: Composite health score H ∈ [0, 100] (Module 4)
+      description: |
+        H = 100 · (0.30·ê + 0.30·l̂ + 0.20·t̂ + 0.20·r̂). Missing signals
+        (e.g. no CPU/memory) degrade gracefully with renormalised weights.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthScoreRequest"
+      responses:
+        "200":
+          description: Health score produced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthScoreResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /alerts/prioritize:
+    post:
+      tags: [alerts]
+      summary: Assign priority to an alert (Module 5)
+      description: |
+        Random Forest multi-class classifier over alert context features
+        (service identity, hour, historical frequency, current health,
+        failure prediction, triggering metric).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertPrioritizeRequest"
+      responses:
+        "200":
+          description: Prioritized alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertPrioritizeResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { $ref: "#/components/responses/ModelUnavailable" }
+
+  /admin/models:
+    get:
+      tags: [admin]
+      summary: List loaded model artifacts
+      responses:
+        "200":
+          description: Model inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelInfo"
+
+  /admin/models/{module}/reload:
+    post:
+      tags: [admin]
+      summary: Reload a module's model from disk
+      parameters:
+        - in: path
+          name: module
+          required: true
+          schema:
+            $ref: "#/components/schemas/ModuleName"
+      responses:
+        "200":
+          description: Reloaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelInfo"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    ModelUnavailable:
+      description: Model not loaded or training in progress
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+
+  schemas:
+    # ─── Shared ────────────────────────────────────────────────
+    ProblemDetail:
+      description: RFC 7807 problem detail response
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, format: int32 }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+        code: { type: string }
+
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        models_loaded:
+          type: array
+          items: { $ref: "#/components/schemas/ModuleName" }
+        version: { type: string }
+
+    ModuleName:
+      type: string
+      enum: [traffic, failure, anomaly, health, alerts]
+
+    ServiceId:
+      type: string
+      format: uuid
+      description: FK to services.id in the platform Postgres schema.
+
+    MetricSnapshot:
+      description: |
+        A single-minute metric observation for a service. Fields align 1:1
+        with Table II of the paper. Missing optional fields (cpu, memory)
+        are handled by graceful degradation in the models.
+      type: object
+      required:
+        - service_id
+        - timestamp
+        - request_count
+        - response_time_mean
+        - response_time_p95
+        - response_time_p99
+        - error_rate
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        timestamp: { type: string, format: date-time }
+        request_count: { type: integer, minimum: 0 }
+        response_time_mean: { type: number, description: "ms" }
+        response_time_p95: { type: number, description: "ms" }
+        response_time_p99: { type: number, description: "ms" }
+        error_rate:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction of 4xx+5xx responses over total.
+        cpu_usage_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+          nullable: true
+        memory_usage_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+          nullable: true
+
+    ModelInfo:
+      type: object
+      required: [module, version, trained_at]
+      properties:
+        module: { $ref: "#/components/schemas/ModuleName" }
+        version: { type: string }
+        algorithm: { type: string, example: xgboost.XGBRegressor }
+        trained_at: { type: string, format: date-time }
+        training_rows: { type: integer }
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+          description: Held-out evaluation metrics (RMSE, MAPE, F1, ...)
+
+    # ─── Module 1: Traffic ─────────────────────────────────────
+    TrafficPredictionRequest:
+      type: object
+      required: [service_id, horizon_minutes, history]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        horizon_minutes:
+          type: integer
+          enum: [15, 30, 60, 360]
+        history:
+          type: array
+          minItems: 24
+          description: >
+            Recent one-minute snapshots (chronologically ordered). Feature
+            engineering (lag_1h, lag_6h, lag_24h, rolling_15m) is computed
+            server-side from this window.
+          items: { $ref: "#/components/schemas/MetricSnapshot" }
+
+    TrafficPredictionResponse:
+      type: object
+      required: [service_id, horizon_minutes, predicted_rpm, model_version]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        horizon_minutes: { type: integer }
+        predicted_rpm: { type: number }
+        confidence_interval:
+          type: object
+          properties:
+            lower: { type: number }
+            upper: { type: number }
+        model_version: { type: string }
+        generated_at: { type: string, format: date-time }
+
+    # ─── Module 2: Failure ─────────────────────────────────────
+    FailurePredictionRequest:
+      type: object
+      required: [service_id, history]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        history:
+          type: array
+          minItems: 30
+          items: { $ref: "#/components/schemas/MetricSnapshot" }
+
+    FailurePredictionResponse:
+      type: object
+      required: [service_id, failure_probability, horizon_minutes, model_version]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        failure_probability:
+          type: number
+          minimum: 0
+          maximum: 1
+        risk_level:
+          type: string
+          enum: [low, medium, high, critical]
+        horizon_minutes:
+          type: integer
+          example: 30
+        contributing_features:
+          type: array
+          description: Top-k SHAP-style contributions (best effort).
+          items:
+            type: object
+            properties:
+              feature: { type: string }
+              contribution: { type: number }
+        model_version: { type: string }
+        generated_at: { type: string, format: date-time }
+
+    # ─── Module 3: Anomaly ─────────────────────────────────────
+    AnomalyRequest:
+      type: object
+      required: [service_id, snapshot]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        snapshot: { $ref: "#/components/schemas/MetricSnapshot" }
+
+    AnomalyResponse:
+      type: object
+      required: [service_id, anomaly_score, is_anomaly, model_version]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        anomaly_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Higher = more anomalous.
+        is_anomaly: { type: boolean }
+        contamination:
+          type: number
+          description: Threshold used for the boolean flag.
+        model_version: { type: string }
+        generated_at: { type: string, format: date-time }
+
+    # ─── Module 4: Health Score ────────────────────────────────
+    HealthScoreRequest:
+      type: object
+      required: [service_id, snapshot]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        snapshot: { $ref: "#/components/schemas/MetricSnapshot" }
+        traffic_stability:
+          type: number
+          nullable: true
+          description: >
+            Normalised traffic stability signal (0..1). If null, derived
+            from history variance server-side when available.
+
+    HealthScoreResponse:
+      type: object
+      required: [service_id, score, status]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        score:
+          type: number
+          minimum: 0
+          maximum: 100
+        status:
+          type: string
+          enum: [healthy, warning, degraded, critical]
+        components:
+          type: object
+          properties:
+            error:   { type: number, description: normalised inverted error rate }
+            latency: { type: number, description: normalised inverted P99 latency }
+            traffic: { type: number, description: traffic stability }
+            resource:{ type: number, description: normalised inverted resource usage }
+        generated_at: { type: string, format: date-time }
+
+    # ─── Module 5: Alert Prioritization ────────────────────────
+    AlertContext:
+      type: object
+      required: [service_id, triggering_metric, hour_of_day]
+      properties:
+        service_id: { $ref: "#/components/schemas/ServiceId" }
+        triggering_metric:
+          type: string
+          enum: [latency, error_rate, availability]
+        hour_of_day: { type: integer, minimum: 0, maximum: 23 }
+        alert_frequency_24h:
+          type: integer
+          description: Prior alerts for this service in the last 24h.
+        current_health_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        failure_prediction_active: { type: boolean }
+        service_is_payment_or_auth: { type: boolean }
+
+    AlertPrioritizeRequest:
+      type: object
+      required: [alert_id, context]
+      properties:
+        alert_id: { type: string }
+        context: { $ref: "#/components/schemas/AlertContext" }
+
+    AlertPrioritizeResponse:
+      type: object
+      required: [alert_id, priority, model_version]
+      properties:
+        alert_id: { type: string }
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        rationale:
+          type: string
+          description: Human-readable explanation of the assigned label.
+        model_version: { type: string }
+        generated_at: { type: string, format: date-time }

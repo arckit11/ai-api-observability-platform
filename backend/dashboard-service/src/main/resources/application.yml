@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: dashboard-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    consumer:
+      group-id: dashboard
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.innovations.api.events.*"
+
+server:
+  port: ${PORT_DASHBOARD:8085}
+
+ml:
+  base-url: http://${ML_HOST:ml-service}:${PORT_ML:8000}
+  timeout-ms: ${DASHBOARD_ML_TIMEOUT_MS:2000}
+
+analytics:
+  base-url: http://${ANALYTICS_HOST:analytics-service}:${PORT_ANALYTICS:8084}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      ml-service:
+        slidingWindowSize: 20
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        minimumNumberOfCalls: 10
+
+kafka:
+  topics:
+    predictions: ${KAFKA_TOPIC_PREDICTIONS:predictions}
+    service-health: ${KAFKA_TOPIC_SERVICE_HEALTH:service-health}
+    alerts: ${KAFKA_TOPIC_ALERTS:alerts}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakerevents

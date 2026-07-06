@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: analytics-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:api_analytics}
+    username: ${POSTGRES_USER:api_analytics}
+    password: ${POSTGRES_PASSWORD:change_me_locally}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: ${PORT_ANALYTICS:8084}
+
+analytics:
+  # Sliding-window sizes computed by the aggregation job.
+  windows: [1m, 5m, 1h]
+  cache:
+    latest-ttl-seconds: 30
+    active-services-ttl-seconds: 300
+
+kafka:
+  topics:
+    metrics: ${KAFKA_TOPIC_METRICS:metrics}
+    alerts: ${KAFKA_TOPIC_ALERTS:alerts}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

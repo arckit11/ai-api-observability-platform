@@ -1,0 +1,333 @@
+openapi: 3.0.3
+info:
+  title: API Analytics Platform — Backend
+  version: 0.1.0
+  description: |
+    Consolidated REST surface exposed by the Java/Spring Boot subsystem.
+    In production these paths sit behind the Spring Cloud Gateway on port
+    8080; internally each family is served by a dedicated service.
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev (via gateway)
+
+tags:
+  - name: auth
+    description: Auth Service — JWT issue/refresh
+  - name: registry
+    description: API Registry — services under monitoring
+  - name: analytics
+    description: Analytics Service — historical metrics
+  - name: dashboard
+    description: Dashboard Service — aggregated read APIs
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ─── Auth ─────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: Exchange credentials for a JWT pair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      security: []
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ─── Registry ─────────────────────────────────────────────
+  /registry/services:
+    get:
+      tags: [registry]
+      summary: List registered services
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Service" }
+    post:
+      tags: [registry]
+      summary: Register a service under monitoring
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServiceCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Service" }
+
+  /registry/services/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [registry]
+      summary: Get service
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Service" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [registry]
+      summary: Update service metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServiceUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Service" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [registry]
+      summary: Deregister service
+      responses:
+        "204": { description: Deleted }
+
+  # ─── Analytics ────────────────────────────────────────────
+  /analytics/metrics/latest:
+    get:
+      tags: [analytics]
+      summary: Latest computed metrics per service (cached)
+      parameters:
+        - in: query
+          name: service_id
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MetricAggregate" }
+
+  /analytics/metrics/history:
+    get:
+      tags: [analytics]
+      summary: Historical metrics for ML training / dashboards
+      parameters:
+        - in: query
+          name: service_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: window
+          required: false
+          schema:
+            type: string
+            enum: [1m, 5m, 1h]
+            default: 1m
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MetricAggregate" }
+
+  # ─── Dashboard ────────────────────────────────────────────
+  /dashboard/health:
+    get:
+      tags: [dashboard]
+      summary: Health tile aggregate (Analytics + ML)
+      responses:
+        "200":
+          description: OK
+
+  /dashboard/traffic:
+    get:
+      tags: [dashboard]
+      summary: Traffic tile — current + predicted RPM
+      responses:
+        "200":
+          description: OK
+
+  /dashboard/latency:
+    get:
+      tags: [dashboard]
+      summary: Latency tile — mean, P95, P99
+      responses:
+        "200":
+          description: OK
+
+  /dashboard/alerts:
+    get:
+      tags: [dashboard]
+      summary: Prioritised alerts list
+      responses:
+        "200":
+          description: OK
+
+  /dashboard/predictions:
+    get:
+      tags: [dashboard]
+      summary: Latest cached predictions per service
+      responses:
+        "200":
+          description: OK
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Missing / invalid credentials
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetail" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetail" }
+
+  schemas:
+    ProblemDetail:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+        code: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, description: seconds }
+        roles:
+          type: array
+          items: { type: string, enum: [ADMIN, DEVELOPER, VIEWER] }
+
+    Environment:
+      type: string
+      enum: [production, staging, development]
+
+    ServiceCreate:
+      type: object
+      required: [name, base_url, environment]
+      properties:
+        name: { type: string, maxLength: 100 }
+        base_url: { type: string, format: uri }
+        owner: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        description: { type: string, maxLength: 500 }
+        capture_telemetry: { type: boolean, default: true }
+
+    ServiceUpdate:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        base_url: { type: string, format: uri }
+        owner: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        description: { type: string, maxLength: 500 }
+        capture_telemetry: { type: boolean }
+
+    Service:
+      allOf:
+        - $ref: "#/components/schemas/ServiceCreate"
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    MetricAggregate:
+      type: object
+      required:
+        - service_id
+        - window_start
+        - window_end
+        - request_count
+        - error_rate
+      properties:
+        service_id: { type: string, format: uuid }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        window_size:
+          type: string
+          enum: [1m, 5m, 1h]
+        request_count: { type: integer }
+        rpm: { type: number }
+        response_time_mean: { type: number }
+        response_time_p95: { type: number }
+        response_time_p99: { type: number }
+        error_rate: { type: number, minimum: 0, maximum: 1 }
+        success_rate: { type: number, minimum: 0, maximum: 1 }
