@@ -82,6 +82,28 @@ public class MetricsRepository {
         return jdbc.query(sql, MetricsRepository::mapAggregate);
     }
 
+    public List<java.util.Map<String, Object>> openAlerts(int limit) {
+        String sql = """
+            SELECT id, service_id, triggering_metric, severity, priority,
+                   message, opened_at
+            FROM alerts
+            WHERE closed_at IS NULL
+            ORDER BY opened_at DESC
+            LIMIT ?
+            """;
+        return jdbc.query(sql, (rs, i) -> {
+            java.util.LinkedHashMap<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("id", rs.getObject("id", UUID.class));
+            row.put("service_id", rs.getObject("service_id", UUID.class));
+            row.put("triggering_metric", rs.getString("triggering_metric"));
+            row.put("severity", rs.getString("severity"));
+            row.put("priority", rs.getString("priority"));
+            row.put("message", rs.getString("message"));
+            row.put("opened_at", rs.getObject("opened_at", OffsetDateTime.class));
+            return row;
+        }, limit);
+    }
+
     public List<MetricAggregate> history(UUID serviceId, OffsetDateTime from,
                                          OffsetDateTime to, String windowSize) {
         String sql = """

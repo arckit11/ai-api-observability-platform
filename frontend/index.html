@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>API Performance Analytics</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>API Performance Analytics</h1>
+    <div id="auth-panel">
+      <input id="username" placeholder="username" value="admin" />
+      <input id="password" type="password" placeholder="password" value="admin1234!" />
+      <button id="login">Log in</button>
+      <span id="auth-status" class="pill">signed out</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="health-section" class="card">
+      <h2>Service health <button data-refresh="health" class="refresh">↻</button></h2>
+      <div id="health" class="grid"></div>
+    </section>
+
+    <section id="traffic-section" class="card">
+      <h2>
+        Traffic — current vs forecast (60 min)
+        <button data-refresh="traffic" class="refresh">↻</button>
+      </h2>
+      <table id="traffic-table"></table>
+    </section>
+
+    <section id="latency-section" class="card">
+      <h2>Latency <button data-refresh="latency" class="refresh">↻</button></h2>
+      <table id="latency-table"></table>
+    </section>
+
+    <section id="predictions-section" class="card">
+      <h2>Predictions <button data-refresh="predictions" class="refresh">↻</button></h2>
+      <table id="predictions-table"></table>
+    </section>
+
+    <section id="alerts-section" class="card">
+      <h2>Open alerts <button data-refresh="alerts" class="refresh">↻</button></h2>
+      <table id="alerts-table"></table>
+    </section>
+  </main>
+
+  <footer>
+    <span>Gateway:</span>
+    <input id="gateway-url" value="http://localhost:8080" size="24" />
+    <button id="refresh-all">Refresh all</button>
+    <span id="status" class="pill"></span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -42,4 +42,11 @@ public class AnalyticsController {
             @RequestParam(defaultValue = "1m") String window) {
         return repo.history(serviceId, from, to, window);
     }
+
+    /** Open alerts (closed_at IS NULL) newest-first. */
+    @GetMapping("/alerts")
+    public List<java.util.Map<String, Object>> alerts(
+            @RequestParam(defaultValue = "50") int limit) {
+        return repo.openAlerts(Math.min(200, Math.max(1, limit)));
+    }
 }

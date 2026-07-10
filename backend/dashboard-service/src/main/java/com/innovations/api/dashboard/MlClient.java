@@ -65,6 +65,17 @@ public class MlClient {
         return resp;
     }
 
+    @CircuitBreaker(name = "ml-service", fallbackMethod = "alertsPrioritizeFallback")
+    public Map<String, Object> prioritize(String alertId, Map<String, Object> context) {
+        return post("/alerts/prioritize",
+                Map.of("alert_id", alertId, "context", context));
+    }
+
+    public Map<String, Object> alertsPrioritizeFallback(String alertId, Map<String, Object> context, Throwable t) {
+        return Map.of("alert_id", alertId, "priority", "medium", "stale", true,
+                "reason", "ml-unavailable", "error", t.getMessage());
+    }
+
     @CircuitBreaker(name = "ml-service", fallbackMethod = "anomalyFallback")
     public Map<String, Object> anomaly(UUID serviceId, Map<String, Object> snapshot) {
         Map<String, Object> resp = post("/predict/anomaly",

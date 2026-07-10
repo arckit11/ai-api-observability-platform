@@ -31,6 +31,13 @@ public class AnalyticsClient {
                 .body(new ParameterizedTypeReference<List<Map<String, Object>>>() {});
     }
 
+    public List<Map<String, Object>> alerts() {
+        return client.get()
+                .uri("/analytics/alerts")
+                .retrieve()
+                .body(new ParameterizedTypeReference<List<Map<String, Object>>>() {});
+    }
+
     public List<Map<String, Object>> history(UUID serviceId, int hoursBack) {
         OffsetDateTime to = OffsetDateTime.now(java.time.ZoneOffset.UTC).truncatedTo(ChronoUnit.MINUTES);
         OffsetDateTime from = to.minusHours(hoursBack);

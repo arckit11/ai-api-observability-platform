@@ -86,11 +86,28 @@ public class DashboardController {
         return out;
     }
 
-    /** Alerts placeholder — full alerts pipeline lands with the Analytics
-     * alerting job in a follow-up phase. For now return empty. */
+    /** Open alerts from Analytics, enriched with ML-assigned priority. */
     @GetMapping("/alerts")
     public List<Map<String, Object>> alerts() {
-        return List.of();
+        List<Map<String, Object>> open = analytics.alerts();
+        List<Map<String, Object>> out = new ArrayList<>();
+        int hour = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).getHour();
+        for (Map<String, Object> a : open) {
+            Map<String, Object> ctx = Map.of(
+                    "service_id", String.valueOf(a.get("service_id")),
+                    "triggering_metric", String.valueOf(a.get("triggering_metric")),
+                    "hour_of_day", hour,
+                    "alert_frequency_24h", 0,
+                    "current_health_score", 60.0,
+                    "failure_prediction_active", "critical".equals(a.get("severity")),
+                    "service_is_payment_or_auth", false
+            );
+            Map<String, Object> priority = ml.prioritize(String.valueOf(a.get("id")), ctx);
+            java.util.LinkedHashMap<String, Object> row = new java.util.LinkedHashMap<>(a);
+            row.put("ml_priority", priority);
+            out.add(row);
+        }
+        return out;
     }
 
     // ─── Adapters: metric-row → ML MetricSnapshot ──────────────────────

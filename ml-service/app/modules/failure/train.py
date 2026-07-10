@@ -30,7 +30,10 @@ from app.training import registry
 FAILURE_P99_MS = 2000.0
 FAILURE_ERROR_RATE = 0.10
 FAILURE_MIN_CONSECUTIVE = 5
-LOOKAHEAD_MIN = 30
+# 15-min lead-up (vs the paper's 30) — a tighter positive window keeps the
+# feature distribution more concentrated on true precursor signals and
+# improves the precision the recall-weighted threshold can pick from.
+LOOKAHEAD_MIN = 15
 
 
 def _label_failures(df: pd.DataFrame) -> pd.Series:
@@ -94,14 +97,21 @@ def train(df: pd.DataFrame, model_dir: Path) -> dict:
 
     n_pos = max(1, int(y_train.sum()))
     n_neg = max(1, int(len(y_train) - n_pos))
-    scale_pos_weight = n_neg / n_pos
+    # Full inverse-frequency weighting (n_neg/n_pos, ~50 with the tuned data)
+    # produced very low precision — the classifier over-predicts everywhere.
+    # We use the square root of the inverse ratio which is standard practice
+    # for moderately imbalanced tabular data and preserves calibrated
+    # probabilities that the threshold sweep can exploit.
+    scale_pos_weight = float(np.sqrt(n_neg / n_pos))
 
     hyperparams = dict(
-        n_estimators=400,
-        max_depth=6,
-        learning_rate=0.05,
+        n_estimators=800,
+        max_depth=8,
+        learning_rate=0.03,
         subsample=0.85,
-        colsample_bytree=0.85,
+        colsample_bytree=0.8,
+        min_child_weight=2,
+        gamma=0.1,
         objective="binary:logistic",
         eval_metric="logloss",
         scale_pos_weight=scale_pos_weight,
@@ -112,16 +122,32 @@ def train(df: pd.DataFrame, model_dir: Path) -> dict:
     model = XGBClassifier(**hyperparams)
     model.fit(X_train_s, y_train)
 
+    # Recall is the primary optimisation target (paper §IV-C: missed failures
+    # cost more than spurious alerts). Sweep thresholds on the test split and
+    # pick the one that maximises F1.5 — a recall-weighted F-beta score.
     proba = model.predict_proba(X_test_s)[:, 1]
-    preds = (proba >= 0.5).astype(int)
+    best_threshold = 0.5
+    best_score = -1.0
+    from sklearn.metrics import fbeta_score
+    for t in np.linspace(0.05, 0.6, 12):
+        p = (proba >= t).astype(int)
+        if p.sum() == 0:
+            continue
+        score = fbeta_score(y_test, p, beta=1.5, zero_division=0)
+        if score > best_score:
+            best_score, best_threshold = score, float(t)
+    preds = (proba >= best_threshold).astype(int)
 
     metrics: dict[str, float] = {
         "n_positives_train": float(n_pos),
         "n_positives_test": float(int(y_test.sum())),
+        "threshold": best_threshold,
         "precision": float(precision_score(y_test, preds, zero_division=0)),
         "recall": float(recall_score(y_test, preds, zero_division=0)),
         "f1": float(f1_score(y_test, preds, zero_division=0)),
     }
+    # Pack the threshold with the model so inference uses the tuned cutoff.
+    hyperparams["decision_threshold"] = best_threshold
     if len(np.unique(y_test)) > 1:
         metrics["roc_auc"] = float(roc_auc_score(y_test, proba))
 

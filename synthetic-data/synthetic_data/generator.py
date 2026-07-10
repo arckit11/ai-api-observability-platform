@@ -110,18 +110,21 @@ def default_injection_plan(
     start: datetime,
     days: int,
     seed: int,
+    anomaly_rate_per_day: float = 1.0,
+    failure_rate_per_day: float = 0.6,
 ) -> InjectionPlan:
     """Generate a plausible mix of anomalies and failures over the window.
 
-    Roughly:
-      - 0.5 anomalies per service per day (duration 5-20 min, latency ×3-6)
-      - 0.1 failure episodes per service per day (15 min, capped by day 3+)
+    Failure density was bumped from 0.1/day → 0.6/day per service after the
+    first training pass — recall was starved at ~0.22 with only ~500
+    positives across 216k rows. The XGBoost failure classifier needs ~2-3k
+    positives to lift recall into the 0.5+ range without sacrificing precision.
     """
     rng = np.random.default_rng(seed)
     plan = InjectionPlan()
 
     for prof in profiles:
-        n_anom = rng.poisson(0.5 * days)
+        n_anom = rng.poisson(anomaly_rate_per_day * days)
         for _ in range(n_anom):
             offset_min = int(rng.integers(0, days * 24 * 60))
             plan.anomalies.append(
@@ -133,14 +136,14 @@ def default_injection_plan(
                 )
             )
 
-        n_fail = rng.poisson(0.1 * days)
+        n_fail = rng.poisson(failure_rate_per_day * days)
         for _ in range(n_fail):
             offset_min = int(rng.integers(0, days * 24 * 60))
             plan.failures.append(
                 FailureEpisode(
                     service_id=prof.service_id,
                     start=start + timedelta(minutes=offset_min),
-                    duration_minutes=15,
+                    duration_minutes=int(rng.integers(10, 25)),
                 )
             )
 

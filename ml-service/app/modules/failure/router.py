@@ -11,12 +11,21 @@ from app.training import registry
 router = APIRouter(prefix="/predict", tags=["failure"])
 
 
-def _risk_level(p: float) -> str:
-    if p >= 0.75:
+def _risk_level(p: float, threshold: float = 0.5) -> str:
+    """Risk buckets calibrated around the tuned decision threshold.
+
+    The trained model chooses a recall-weighted threshold at fit time
+    (persisted in hyperparams["decision_threshold"]). ``critical`` sits at
+    the top decile above threshold, ``high`` above threshold, ``medium``
+    just below (probability worth watching), ``low`` otherwise.
+    """
+    critical = min(0.95, threshold + (1.0 - threshold) * 0.5)
+    medium = max(0.05, threshold * 0.6)
+    if p >= critical:
         return "critical"
-    if p >= 0.5:
+    if p >= threshold:
         return "high"
-    if p >= 0.25:
+    if p >= medium:
         return "medium"
     return "low"
 
@@ -52,6 +61,7 @@ async def predict_failure(req: FailurePredictionRequest) -> FailurePredictionRes
     row = engineer_row(history_dicts)
     X = bundle["scaler"].transform(row.values)
     probability = float(bundle["model"].predict_proba(X)[0, 1])
+    threshold = float(bundle["meta"]["hyperparams"].get("decision_threshold", 0.5))
 
     # Best-effort per-feature contributions via feature importances.
     booster = bundle["model"]
@@ -69,7 +79,7 @@ async def predict_failure(req: FailurePredictionRequest) -> FailurePredictionRes
     resp = FailurePredictionResponse(
         service_id=req.service_id,
         failure_probability=probability,
-        risk_level=_risk_level(probability),
+        risk_level=_risk_level(probability, threshold=threshold),
         horizon_minutes=30,
         contributing_features=contributions,
         model_version=bundle["meta"]["version"],
